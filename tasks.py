@@ -1,38 +1,21 @@
 """
 tasks.py — task storage and management for Task AI
-Stores tasks in a local JSON file (data/tasks.json).
+Backed by MongoDB (tasks collection).
 """
 
-import json
-import os
-import uuid
-from importlib import import_module
-from datetime import datetime, date
+from datetime import datetime
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-TASKS_FILE = os.path.join(DATA_DIR, "tasks.json")
+from bson.objectid import ObjectId
+import plotly.graph_objects as go
 
-os.makedirs(DATA_DIR, exist_ok=True)
-
-
-def load_tasks() -> list:
-    if not os.path.exists(TASKS_FILE):
-        return []
-    with open(TASKS_FILE, "r") as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError:
-            return []
-
-
-def save_tasks(tasks: list) -> None:
-    with open(TASKS_FILE, "w") as f:
-        json.dump(tasks, f, indent=2)
-
+from db import get_db
 
 # Lower number = higher priority (used for sorting)
 PRIORITY_ORDER = {"High": 0, "Medium": 1, "Low": 2}
+
+
+def _tasks():
+    return get_db()["tasks"]
 
 
 def add_task(
@@ -42,9 +25,7 @@ def add_task(
     due_date: str = "",
     priority: str = "Medium",
 ) -> None:
-    tasks = load_tasks()
-    tasks.append({
-        "id": str(uuid.uuid4()),
+    _tasks().insert_one({
         "username": username,
         "title": title,
         "description": description,
@@ -54,26 +35,35 @@ def add_task(
         "created_at": datetime.now().isoformat(),
         "completed_at": None,
     })
-    save_tasks(tasks)
 
 
 def get_user_tasks(username: str) -> list:
-    return [t for t in load_tasks() if t["username"] == username]
+    """Return the user's tasks with Mongo's _id normalized to a string 'id' field."""
+    docs = list(_tasks().find({"username": username}).sort("created_at", 1))
+    tasks = []
+    for d in docs:
+        d["id"] = str(d.pop("_id"))
+        tasks.append(d)
+    return tasks
 
 
 def toggle_complete(task_id: str) -> None:
-    tasks = load_tasks()
-    for t in tasks:
-        if t["id"] == task_id:
-            t["completed"] = not t["completed"]
-            t["completed_at"] = datetime.now().isoformat() if t["completed"] else None
-    save_tasks(tasks)
+    col = _tasks()
+    task = col.find_one({"_id": ObjectId(task_id)})
+    if not task:
+        return
+    new_status = not task["completed"]
+    col.update_one(
+        {"_id": ObjectId(task_id)},
+        {"$set": {
+            "completed": new_status,
+            "completed_at": datetime.now().isoformat() if new_status else None,
+        }},
+    )
 
 
 def delete_task(task_id: str) -> None:
-    tasks = load_tasks()
-    tasks = [t for t in tasks if t["id"] != task_id]
-    save_tasks(tasks)
+    _tasks().delete_one({"_id": ObjectId(task_id)})
 
 
 def task_counts(username: str) -> dict:
@@ -85,7 +75,6 @@ def task_counts(username: str) -> dict:
 
 def make_pie_chart(username: str, accent: str, bg: str, text_color: str):
     """Return a Plotly pie chart figure of completed vs pending tasks."""
-    go = import_module("plotly.graph_objects")
     counts = task_counts(username)
     labels = ["Completed", "Pending"]
     values = [counts["completed"], counts["pending"]]
@@ -113,6 +102,7 @@ def make_pie_chart(username: str, accent: str, bg: str, text_color: str):
     )
     return fig
 
+
 def suggest_next_task(username: str) -> dict | None:
     """
     Suggest the single most important pending task to do next.
@@ -131,6 +121,7 @@ def suggest_next_task(username: str) -> dict | None:
 
     pending.sort(key=sort_key)
     return pending[0]
+
 
 def completion_dates(username: str) -> list:
     """List of date() objects on which the user completed at least one task."""
