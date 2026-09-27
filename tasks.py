@@ -3,7 +3,7 @@ tasks.py — task storage and management for Task AI
 Backed by MongoDB (tasks collection).
 """
 
-from datetime import datetime
+from datetime import datetime, date
 
 from bson.objectid import ObjectId
 import plotly.graph_objects as go
@@ -13,9 +13,53 @@ from db import get_db
 # Lower number = higher priority (used for sorting)
 PRIORITY_ORDER = {"High": 0, "Medium": 1, "Low": 2}
 
+# Keywords used to auto-detect priority from what the user typed
+PRIORITY_KEYWORDS = {
+    "High": [
+        "urgent", "asap", "important", "critical", "exam", "deadline",
+        "interview", "submission", "emergency", "due today", "final",
+        "presentation", "meeting", "immediately",
+    ],
+    "Low": [
+        "someday", "optional", "later", "whenever", "low priority",
+        "maybe", "eventually", "casual", "no rush",
+    ],
+}
+
 
 def _tasks():
     return get_db()["tasks"]
+
+
+def predict_priority(title: str, description: str = "", due_date: str = "") -> str:
+    """
+    Auto-predict a task's priority from its content and due date.
+    1. Keyword match in title/description wins first.
+    2. Otherwise, priority is inferred from how soon the due date is.
+    3. If neither gives a signal, defaults to "Medium".
+    """
+    text = f"{title} {description}".lower()
+
+    for word in PRIORITY_KEYWORDS["High"]:
+        if word in text:
+            return "High"
+    for word in PRIORITY_KEYWORDS["Low"]:
+        if word in text:
+            return "Low"
+
+    if due_date:
+        try:
+            days_left = (date.fromisoformat(due_date) - date.today()).days
+            if days_left <= 1:
+                return "High"
+            elif days_left <= 5:
+                return "Medium"
+            else:
+                return "Low"
+        except ValueError:
+            pass
+
+    return "Medium"
 
 
 def add_task(
@@ -23,8 +67,12 @@ def add_task(
     title: str,
     description: str = "",
     due_date: str = "",
-    priority: str = "Medium",
-) -> None:
+    priority: str | None = None,
+) -> str:
+    """Add a task. If priority isn't given, it's auto-predicted. Returns the priority used."""
+    if priority is None:
+        priority = predict_priority(title, description, due_date)
+
     _tasks().insert_one({
         "username": username,
         "title": title,
@@ -35,6 +83,7 @@ def add_task(
         "created_at": datetime.now().isoformat(),
         "completed_at": None,
     })
+    return priority
 
 
 def get_user_tasks(username: str) -> list:

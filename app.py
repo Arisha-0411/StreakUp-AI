@@ -104,24 +104,49 @@ def render_overview(username, palette):
 # ---------------------------------------------------------------------------
 def render_add_task(username):
     st.header("➕ Add a Task")
+    st.caption("Priority is predicted automatically from your task's title, description, and due date.")
     with st.form("add_task_form", clear_on_submit=True):
         title = st.text_input("Task title")
         description = st.text_area("Description (optional)")
         due_date = st.date_input("Due date", value=None)
-        priority = st.selectbox("Priority", ["High", "Medium", "Low"], index=1)
         submitted = st.form_submit_button("Add Task")
         if submitted:
             if not title.strip():
                 st.error("Please enter a task title.")
             else:
-                task_store.add_task(
+                assigned_priority = task_store.add_task(
                     username,
                     title.strip(),
                     description.strip(),
                     str(due_date) if due_date else "",
-                    priority,
                 )
-                st.success(f"Task '{title}' Added Successfully! 🎉")
+                st.success(
+                    f"Task '{title}' was added successfully! 🎉 "
+                    f"Predicted priority: **{assigned_priority}**"
+                )
+
+    with st.expander("💡 How is priority decided? (click to see example keywords)"):
+        st.markdown(
+            """
+            The priority is picked automatically based on the words in your **title**
+            and **description**, and on how soon your **due date** is.
+
+            **🔴 Words that push priority to High:**
+            `urgent`, `asap`, `important`, `critical`, `exam`, `deadline`,
+            `interview`, `submission`, `emergency`, `due today`, `final`,
+            `presentation`, `meeting`, `immediately`
+
+            **🟢 Words that push priority to Low:**
+            `someday`, `optional`, `later`, `whenever`, `low priority`,
+            `maybe`, `eventually`, `casual`, `no rush`
+
+            **🟡 No matching words?** Priority falls back to your due date:
+            - Due in 1 day or less → **High**
+            - Due within 5 days → **Medium**
+            - Due later than that, or no due date → **Low**
+            - No keywords and no due date at all → defaults to **Medium**
+            """
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +162,7 @@ def render_all_tasks(username):
             unsafe_allow_html=True,
         )
 
-        user_tasks = task_store.get_user_tasks(username)
+    user_tasks = task_store.get_user_tasks(username)
     if not user_tasks:
         st.info("No tasks yet — add one from the 'Add Task' page!")
         return
@@ -167,115 +192,4 @@ def render_all_tasks(username):
                 if t["due_date"]:
                     st.caption(f"Due: {t['due_date']}")
             with c2:
-                label = "Mark Pending" if t["completed"] else "Mark Complete"
-                if st.button(label, key=f"toggle_{t['id']}"):
-                    task_store.toggle_complete(t["id"])
-                    st.rerun()
-            with c3:
-                if st.button("🗑️", key=f"delete_{t['id']}"):
-                    task_store.delete_task(t["id"])
-                    st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-
-
-# ---------------------------------------------------------------------------
-# Page: Rewards
-# ---------------------------------------------------------------------------
-def render_rewards(username):
-    st.header("🏆 Rewards")
-
-    streak = rewards.compute_streak(username)
-    st.subheader(f"🔥 Current Streak: {streak} day{'s' if streak != 1 else ''}")
-    st.caption("Complete at least one task per day to keep your streak alive!")
-
-    st.markdown("---")
-    st.subheader("🎖️ Badges")
-
-    badges = rewards.get_badges_status(username)
-    cols = st.columns(3)
-    for i, badge in enumerate(badges):
-        with cols[i % 3]:
-            css_class = "badge-card" if badge["earned"] else "badge-card badge-locked"
-            st.markdown(
-                f"""
-                <div class="{css_class}">
-                    <div style="font-size:2.5em;">{badge['emoji']}</div>
-                    <b>{badge['label']}</b>
-                    <p style="font-size:0.85em;">{badge['desc']}</p>
-                    <p style="font-size:0.8em;">{'Earned ✅' if badge['earned'] else 'Locked 🔒'}</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-
-# ---------------------------------------------------------------------------
-# Page: Profile
-# ---------------------------------------------------------------------------
-def render_profile(username):
-    st.header("👤 Profile")
-    profile = auth.get_user_profile(username)
-    st.markdown(f"### {avatar_for(username)} {profile.get('full_name', username)}")
-    st.write(f"**Username:** {username}")
-    st.write(f"**Gender:** {profile.get('gender', 'N/A').capitalize()}")
-
-    counts = task_store.task_counts(username)
-    st.write(f"**Tasks completed:** {counts['completed']}")
-    st.write(f"**Current streak:** {rewards.compute_streak(username)} days")
-
-    st.markdown("---")
-    if st.button("Log Out"):
-        st.session_state.logged_in = False
-        st.session_state.username = None
-        st.rerun()
-
-
-# ---------------------------------------------------------------------------
-# Main app flow
-# ---------------------------------------------------------------------------
-def main():
-    palette = apply_theme()
-
-    if not st.session_state.logged_in:
-        render_auth_screen(palette)
-        return
-
-    username = st.session_state.username
-    profile = auth.get_user_profile(username)
-
-    # Welcome popup shown once right after login
-    if st.session_state.show_welcome:
-        st.toast(f"Welcome back!!!, {profile.get('full_name', username)}! 👋", icon="🎉")
-        st.balloons()
-        st.session_state.show_welcome = False
-
-    # Sidebar navigation
-    with st.sidebar:
-        st.markdown(f"## ✅ Task AI")
-        st.markdown(f"**{avatar_for(username)} {profile.get('full_name', username)}**")
-        st.markdown("---")
-
-        st.session_state.page = st.radio(
-            "Navigate",
-            ["Overview", "Add Task",  "Rewards", "All Tasks", "Profile"],
-            index=["Overview", "Add Task", "Rewards", "All Tasks", "Profile"].index(
-                st.session_state.page
-            ),
-        )
-
-    # Route to selected page
-    page = st.session_state.page
-    if page == "Overview":
-        render_overview(username, palette)
-    elif page == "Add Task":
-        render_add_task(username)
-    elif page == "All Tasks":
-        render_all_tasks(username)
-    elif page == "Rewards":
-        render_rewards(username)
-    elif page == "Profile":
-        render_profile(username)
-
-
-if __name__ == "__main__":
-    main()
+                pass
