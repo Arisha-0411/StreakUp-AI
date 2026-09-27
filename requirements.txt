@@ -1,2 +1,5 @@
 streamlit>=1.32
 plotly>=5.18
+pymongo>=4.6
+dnspython>=2.5
+certifi
