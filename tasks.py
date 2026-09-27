@@ -6,9 +6,8 @@ Stores tasks in a local JSON file (data/tasks.json).
 import json
 import os
 import uuid
+from importlib import import_module
 from datetime import datetime, date
-
-import plotly.graph_objects as go
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -32,7 +31,17 @@ def save_tasks(tasks: list) -> None:
         json.dump(tasks, f, indent=2)
 
 
-def add_task(username: str, title: str, description: str = "", due_date: str = "") -> None:
+# Lower number = higher priority (used for sorting)
+PRIORITY_ORDER = {"High": 0, "Medium": 1, "Low": 2}
+
+
+def add_task(
+    username: str,
+    title: str,
+    description: str = "",
+    due_date: str = "",
+    priority: str = "Medium",
+) -> None:
     tasks = load_tasks()
     tasks.append({
         "id": str(uuid.uuid4()),
@@ -40,6 +49,7 @@ def add_task(username: str, title: str, description: str = "", due_date: str = "
         "title": title,
         "description": description,
         "due_date": due_date,
+        "priority": priority,
         "completed": False,
         "created_at": datetime.now().isoformat(),
         "completed_at": None,
@@ -75,6 +85,7 @@ def task_counts(username: str) -> dict:
 
 def make_pie_chart(username: str, accent: str, bg: str, text_color: str):
     """Return a Plotly pie chart figure of completed vs pending tasks."""
+    go = import_module("plotly.graph_objects")
     counts = task_counts(username)
     labels = ["Completed", "Pending"]
     values = [counts["completed"], counts["pending"]]
@@ -102,6 +113,24 @@ def make_pie_chart(username: str, accent: str, bg: str, text_color: str):
     )
     return fig
 
+def suggest_next_task(username: str) -> dict | None:
+    """
+    Suggest the single most important pending task to do next.
+    Ranking: High > Medium > Low priority, then earliest due date,
+    then oldest task first. Returns None if nothing is pending.
+    """
+    pending = [t for t in get_user_tasks(username) if not t["completed"]]
+    if not pending:
+        return None
+
+    def sort_key(t):
+        rank = PRIORITY_ORDER.get(t.get("priority", "Medium"), 1)
+        due = t.get("due_date") or "9999-12-31"
+        created = t.get("created_at", "")
+        return (rank, due, created)
+
+    pending.sort(key=sort_key)
+    return pending[0]
 
 def completion_dates(username: str) -> list:
     """List of date() objects on which the user completed at least one task."""

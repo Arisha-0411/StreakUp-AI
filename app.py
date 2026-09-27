@@ -108,6 +108,7 @@ def render_add_task(username):
         title = st.text_input("Task title")
         description = st.text_area("Description (optional)")
         due_date = st.date_input("Due date", value=None)
+        priority = st.selectbox("Priority", ["High", "Medium", "Low"], index=1)
         submitted = st.form_submit_button("Add Task")
         if submitted:
             if not title.strip():
@@ -118,6 +119,7 @@ def render_add_task(username):
                     title.strip(),
                     description.strip(),
                     str(due_date) if due_date else "",
+                    priority,
                 )
                 st.success(f"Task '{title}' Added Successfully! 🎉")
 
@@ -135,10 +137,22 @@ def render_all_tasks(username):
             unsafe_allow_html=True,
         )
 
-    user_tasks = task_store.get_user_tasks(username)
+        user_tasks = task_store.get_user_tasks(username)
     if not user_tasks:
         st.info("No tasks yet — add one from the 'Add Task' page!")
         return
+
+    # Suggestion box: which pending task to tackle next
+    suggestion = task_store.suggest_next_task(username)
+    if suggestion:
+        st.info(
+            f"🎯 **Suggested next task:** {suggestion['title']} "
+            f"({suggestion.get('priority', 'Medium')} priority"
+            + (f", due {suggestion['due_date']}" if suggestion.get("due_date") else "")
+            + ")"
+        )
+
+    PRIORITY_BADGE = {"High": "🔴 High", "Medium": "🟡 Medium", "Low": "🟢 Low"}
 
     for t in user_tasks:
         with st.container():
@@ -146,7 +160,8 @@ def render_all_tasks(username):
             c1, c2, c3 = st.columns([5, 2, 1])
             with c1:
                 status = "✅" if t["completed"] else "🕒"
-                st.markdown(f"**{status} {t['title']}**")
+                priority_label = PRIORITY_BADGE.get(t.get("priority", "Medium"), "🟡 Medium")
+                st.markdown(f"**{status} {t['title']}**  &nbsp; {priority_label}")
                 if t["description"]:
                     st.caption(t["description"])
                 if t["due_date"]:
